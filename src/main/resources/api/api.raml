@@ -1,0 +1,27 @@
+#%RAML 1.0
+title: Order API
+version: v1
+baseUri: http://localhost:8081/api
+
+/orders:
+  post:
+    body:
+      application/json:
+        type: object
+    responses:
+      201:
+        body:
+          application/json:
+            example: { "message": "Order created" }
+
+/orders/{id}:
+  get:
+    responses:
+      200:
+        body:
+          application/json:
+            example: { "id": 1, "client": "John Doe", "amount": 100, "status": "pending" }
+      404:
+        body:
+          application/json:
+            example: { "error": "Order not found" }

@@ -1,0 +1,371 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:jms="http://www.mulesoft.org/schema/mule/jms" xmlns:validation="http://www.mulesoft.org/schema/mule/validation" xmlns:db="http://www.mulesoft.org/schema/mule/db" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:apikit="http://www.mulesoft.org/schema/mule/mule-apikit" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core" xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd http://www.mulesoft.org/schema/mule/mule-apikit http://www.mulesoft.org/schema/mule/mule-apikit/current/mule-apikit.xsd http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd 
+http://www.mulesoft.org/schema/mule/db http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd
+http://www.mulesoft.org/schema/mule/validation http://www.mulesoft.org/schema/mule/validation/current/mule-validation.xsd
+http://www.mulesoft.org/schema/mule/jms http://www.mulesoft.org/schema/mule/jms/current/mule-jms.xsd">
+    <http:listener-config name="api-httpListenerConfig">
+        <http:listener-connection host="0.0.0.0" port="8082" />
+    </http:listener-config>
+    <apikit:config name="api-config" api="api.raml" outboundHeadersMapName="outboundHeaders" httpStatusVarName="httpStatus" />
+    <db:config name="Database_Config" doc:name="Database Config" doc:id="2c3ce2b8-3722-4153-a067-b9fa8ed7db68" >
+		<db:generic-connection url="jdbc:postgresql://localhost:5432/testdb" driverClassName="org.postgresql.Driver" user="postgres" password="postgres" />
+	</db:config>
+	<http:listener-config name="HTTP_Listener_config" doc:name="HTTP Listener config" doc:id="2bd80386-861d-46a9-b1d1-5d196f50f8a0" basePath="/orders">
+		<http:listener-connection host="localhost" port="8081" />
+	</http:listener-config>
+	<jms:config name="JMS_Config" doc:name="JMS Config" doc:id="06aadf3f-781c-4947-b4f7-f06b07e90b91" >
+		<jms:active-mq-connection username="admin" password="password" />
+	</jms:config>
+	<http:listener-config name="HTTP_Listener_config2" doc:name="HTTP Listener config" doc:id="aa5741ab-e024-4f68-9a65-7b351a8066ec" basePath="/otherapi" >
+		<http:listener-connection host="0.0.0.0" port="8083" />
+	</http:listener-config>
+	<configuration doc:name="Configuration" doc:id="48f1c968-9557-4bc3-bfe0-6f1748dc06c3" defaultErrorHandler-ref="GlobalError_Handler" />
+	<flow name="addOrderFlow" doc:id="e985680f-ab86-434d-bad0-8f05188bc5e7" >
+		<http:listener doc:name="Listen to POST" doc:id="c5c54a5c-c9bc-42da-8364-d36ea67c094d" config-ref="HTTP_Listener_config" path="/add" allowedMethods="POST">
+			<http:response statusCode="201" reasonPhrase="Order created successfully!" />
+			<http:error-response statusCode="#[vars.errorStatusCode]" />
+		</http:listener>
+		<ee:transform doc:name="Transform Message" doc:id="f4fb411d-2bdc-4d29-a952-517c98439562">
+			<ee:message>
+				<ee:set-payload><![CDATA[%dw 2.0
+output application/java
+var order = payload as Object
+---
+{
+  client: order.client as String,
+  amount: order.amount as Number,
+  status: order.status as String
+}]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<db:insert doc:name="Insert order" doc:id="6279009e-806b-4f27-9b47-7b8e373e7b50" config-ref="Database_Config">
+			<db:sql ><![CDATA[INSERT INTO orders (client, amount, status) VALUES (:client, :amount, :status)]]></db:sql>
+			<db:input-parameters><![CDATA[#[payload]]]></db:input-parameters>
+		</db:insert>
+		<set-payload value='#[{&#10;	"message": "Order created successfully!"&#10;}]' doc:name="Successfull Payload" doc:id="747a0619-cf2c-49ae-901f-f92bb0574bb4" />
+		<ee:transform doc:name="Transform Message" doc:id="9a99c782-0c08-457e-a253-4c5c416b6456" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+payload]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+	</flow>
+	<flow name="getOrderByIdFlow" doc:id="846b935a-0126-44b0-87b8-e0a806b62a11" >
+		<http:listener doc:name="Listener to GET" doc:id="c2d12b84-174c-476a-ab77-e50c53fadbd9" config-ref="HTTP_Listener_config" path="/{id}" allowedMethods="GET" outputEncoding="UTF-8">
+			<http:error-response statusCode="#[vars.errorStatusCode]" reasonPhrase="#[vars.errorReasonPhrase]" />
+		</http:listener>
+		<db:select doc:name="Select order by id" doc:id="79a31df6-105e-4737-ab95-8679b8b34afb" config-ref="Database_Config">
+			<db:sql ><![CDATA[select * from orders where id = :id]]></db:sql>
+			<db:input-parameters ><![CDATA[#[{"id": attributes.uriParams.id}]]]></db:input-parameters>
+		</db:select>
+		<validation:is-not-empty-collection doc:name="Is not empty order" doc:id="6e8a7680-c3cf-4ccd-8ce6-a27c39ab49d4" />
+		<ee:transform doc:name="Transform Message" doc:id="411edf82-fe94-4dc9-8a13-1ee5bdca00e9" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+{
+    id: payload[0].id,
+    client: payload[0].client,
+    amount: payload[0].amount,
+    status: payload[0].status
+} ]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<error-handler>
+			<on-error-propagate enableNotifications="true" logException="true" doc:name="On Error Propagate" doc:id="f2b350df-5cbc-4448-af7d-84ee74298dc0" type="VALIDATION:EMPTY_COLLECTION">
+				<set-variable value="#[404]" doc:name="Set Status Code" doc:id="396e4b50-e5ce-4c8e-8120-e63d52cd557d" variableName="errorStatusCode" />
+				<set-variable value="Order not found" doc:name="Set Reason Phrase" doc:id="ecf26983-c313-49b4-b2d0-c8a9b8ee2aa6" variableName="errorReasonPhrase" />
+			</on-error-propagate>
+		</error-handler>
+	</flow>
+	<flow name="updateOrderStatusByIdFlow" doc:id="76214f2a-dd6a-4fa8-a17b-7ae85f6c7616" >
+		<http:listener doc:name="Listener to PUT" doc:id="5fb9cf35-78cd-4a3e-857b-d2ac6b0d281d" config-ref="HTTP_Listener_config" path="/{id}/status" allowedMethods="PUT">
+			<http:response statusCode="200" reasonPhrase="Order successfully updated!" />
+			<http:error-response statusCode="#[vars.errorStatusCode]" />
+		</http:listener>
+		<set-variable value="#[attributes.uriParams.id]" doc:name="Save id" doc:id="9babd994-5065-4ddb-99b5-9ca2d2d77acf" variableName="orderId"/>
+		<set-variable value="#[payload.status]" doc:name="Save status" doc:id="a7930644-e0c1-45be-9385-695b6e5e43ff" variableName="newStatus"/>
+		<ee:transform doc:name="Transform Message" doc:id="659e2145-94ab-4879-b843-717c41fdb23d" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/java
+var orderStatus = payload as Object
+---
+{
+  status: orderStatus.status as String
+}]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<db:update doc:name="Update order status by id" doc:id="9ea12c3f-90f5-4165-967d-82c0c7d98812" config-ref="Database_Config">
+			<db:sql ><![CDATA[UPDATE orders SET status = :status WHERE id = :id]]></db:sql>
+			<db:input-parameters ><![CDATA[#[{
+	"id": attributes.uriParams.id,
+	"status": payload.status
+}]]]></db:input-parameters>
+		</db:update>
+		<logger level="INFO" doc:name="Logger" doc:id="232d8040-6d70-4271-9317-4a260e09946d" message='The order status has been successfully updated. ID: #[vars.orderId], New status: #[vars.newStatus]'/>
+		<jms:publish doc:name="Publish" doc:id="b643eacb-0452-43c5-b20e-484949bdc676" config-ref="JMS_Config" destination="orders.status.updates">
+			<jms:message >
+				<jms:body ><![CDATA[#[output application/json
+---
+{
+  "id": vars.orderId,
+  "status": vars.newStatus
+}]]]></jms:body>
+			</jms:message>
+		</jms:publish>
+		<set-payload value='#[{&#10;	"message": "Order successfully updated!"&#10;}]' doc:name="Successfull Payload" doc:id="41a03bcb-79cb-496a-a089-e41103d2103f" />
+		<ee:transform doc:name="Transform Message" doc:id="f5e042cb-c64f-4e0b-b506-43a919235b06" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+payload]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+	</flow>
+	<flow name="deleteOrderByIdFlow" doc:id="4cb7ca78-dbfd-4f17-829c-3a9d3afc8ab9" >
+		<http:listener doc:name="Listener to DELETE" doc:id="3f68e3c0-30e3-4624-89d0-6758b31e8ced" path="/{id}" config-ref="HTTP_Listener_config">
+			<http:response statusCode="200" />
+			<http:error-response statusCode="#[vars.errorStatusCode]" />
+		</http:listener>
+		<db:delete doc:name="Delete" doc:id="1fffa292-df32-4d41-b2b4-da7e3d0e4a72" config-ref="Database_Config">
+			<db:sql ><![CDATA[DELETE FROM orders WHERE id = :id]]></db:sql>
+			<db:input-parameters ><![CDATA[#[{
+	"id": attributes.uriParams.id
+}]]]></db:input-parameters>
+		</db:delete>
+		<set-payload value='#[{&#10;	"message": "Order deleted successfully"&#10;}]' doc:name="Successfull Payload" doc:id="5976786e-1beb-4ac2-b27a-7a6317d7c0ac" />
+		<ee:transform doc:name="Transform Message" doc:id="134a3d9f-8823-4724-b3cb-caa8c43665aa" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+payload]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+	</flow>
+	<flow name="checkActiveMQMessageFlow" doc:id="58e076a5-b98f-489a-aa0f-999ce6b72c69">
+		<http:listener doc:name="Listener to Other API" doc:id="1f12c3d6-aac8-4e2a-881b-ece2a5c9acf5" config-ref="HTTP_Listener_config2" path="/process" allowedMethods="GET,POST">
+			<http:error-response statusCode="#[vars.errorStatusCode]" />
+		</http:listener>
+		<jms:consume doc:name="Consume" doc:id="728e026b-6c1a-4d32-977d-609d810ec503" config-ref="JMS_Config" destination="orders.status.updates" />
+		<ee:transform doc:name="Transform Message" doc:id="889b760d-42aa-41a8-bc1f-9f7a3f04be9f" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/java
+var activeMQData = payload as Object
+---
+{
+    orderId: activeMQData.id as Number,
+    newStatus: activeMQData.status as String
+}]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<logger level="INFO" doc:name="Logger" doc:id="a3b41c6d-b30c-4c60-93a9-e732e80f79b3" message='Message received from ActiveMQ: ID: #[payload.orderId], Status: #[payload.newStatus]' />
+		<http:request method="GET" doc:name="Request" doc:id="68733aaf-007c-4c9e-be88-cd8253f9d5a4" url="https://example.com"/>
+		<error-handler>
+        <on-error-propagate type="ANY">
+            <logger level="ERROR" message="Error processing message: #[error.description]" doc:name="Log Error"/>
+            <jms:publish config-ref="JMS_Config" destination="orders.dlq" doc:name="Send to DLQ"/>
+        </on-error-propagate>
+    </error-handler>
+	</flow>
+	<error-handler name="GlobalError_Handler" doc:id="b2dde651-eab9-4f80-8921-1382b9f33fd0" >
+		<on-error-propagate enableNotifications="true" logException="true" doc:name="On Error Propagate 400" doc:id="c72f271c-bfab-4642-b610-698a6e760ab8" type="ANY">
+			<ee:transform doc:name="Transform Message" doc:id="8115fa9a-decf-4d0f-beee-6812f1daed73" >
+				<ee:message >
+					<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+{
+    "error": "Invalid data",
+    "details": error.errorMessage.payload
+}]]></ee:set-payload>
+				</ee:message>
+			</ee:transform>
+			<set-variable value="400" doc:name="Set Variable" doc:id="41c7cb23-0b82-44c2-aa9a-74fa004f8ac3" variableName="errorStatusCode"/>
+		</on-error-propagate>
+		<on-error-propagate enableNotifications="true" logException="true" doc:name="On Error Propagate 500" doc:id="1e58a32f-f026-4a8a-95d2-b0f8f941520b" type="ANY">
+			<ee:transform doc:name="Transform Message" doc:id="ea706058-0642-4bbc-b0f7-eb7d68fe386a" >
+				<ee:message >
+					<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+{
+    "error": "Internal server error",
+    "referenceId": uuid()
+}]]></ee:set-payload>
+				</ee:message>
+			</ee:transform>
+			<set-variable value="500" doc:name="Set Variable" doc:id="d6be332d-5b08-4b42-bfb2-1ea3917ae848" variableName="errorStatusCode" />
+		</on-error-propagate>
+		<on-error-continue enableNotifications="true" logException="true" doc:name="On Error Continue" doc:id="999181ad-067d-4959-ac55-a3afa52d6aa6" type="ANY">
+			<ee:transform doc:name="Transform Message" doc:id="f1116b9e-beb0-4c0a-87b1-893a9418dca1" >
+				<ee:message >
+					<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+{
+    "errorType": error.errorType,
+    "message": error.description
+}]]></ee:set-payload>
+				</ee:message>
+			</ee:transform>
+		</on-error-continue>
+	</error-handler>
+	<flow name="api-main">
+        <http:listener config-ref="api-httpListenerConfig" path="/api/*">
+            <http:response statusCode="#[vars.httpStatus default 200]">
+                <http:headers>#[vars.outboundHeaders default {}]</http:headers>
+            </http:response>
+            <http:error-response statusCode="#[vars.httpStatus default 500]">
+                <http:body>#[payload]</http:body>
+                <http:headers>#[vars.outboundHeaders default {}]</http:headers>
+            </http:error-response>
+        </http:listener>
+        <apikit:router config-ref="api-config" />
+        <error-handler>
+            <on-error-propagate type="APIKIT:BAD_REQUEST">
+                <ee:transform doc:name="Transform Message">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{message: "Bad request"}]]></ee:set-payload>
+                    </ee:message>
+                    <ee:variables>
+                        <ee:set-variable variableName="httpStatus">400</ee:set-variable>
+                    </ee:variables>
+                </ee:transform>
+            </on-error-propagate>
+            <on-error-propagate type="APIKIT:NOT_FOUND">
+                <ee:transform doc:name="Transform Message">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{message: "Resource not found"}]]></ee:set-payload>
+                    </ee:message>
+                    <ee:variables>
+                        <ee:set-variable variableName="httpStatus">404</ee:set-variable>
+                    </ee:variables>
+                </ee:transform>
+            </on-error-propagate>
+            <on-error-propagate type="APIKIT:METHOD_NOT_ALLOWED">
+                <ee:transform doc:name="Transform Message">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{message: "Method not allowed"}]]></ee:set-payload>
+                    </ee:message>
+                    <ee:variables>
+                        <ee:set-variable variableName="httpStatus">405</ee:set-variable>
+                    </ee:variables>
+                </ee:transform>
+            </on-error-propagate>
+            <on-error-propagate type="APIKIT:NOT_ACCEPTABLE">
+                <ee:transform doc:name="Transform Message">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{message: "Not acceptable"}]]></ee:set-payload>
+                    </ee:message>
+                    <ee:variables>
+                        <ee:set-variable variableName="httpStatus">406</ee:set-variable>
+                    </ee:variables>
+                </ee:transform>
+            </on-error-propagate>
+            <on-error-propagate type="APIKIT:UNSUPPORTED_MEDIA_TYPE">
+                <ee:transform doc:name="Transform Message">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{message: "Unsupported media type"}]]></ee:set-payload>
+                    </ee:message>
+                    <ee:variables>
+                        <ee:set-variable variableName="httpStatus">415</ee:set-variable>
+                    </ee:variables>
+                </ee:transform>
+            </on-error-propagate>
+            <on-error-propagate type="APIKIT:NOT_IMPLEMENTED">
+                <ee:transform doc:name="Transform Message">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{message: "Not Implemented"}]]></ee:set-payload>
+                    </ee:message>
+                    <ee:variables>
+                        <ee:set-variable variableName="httpStatus">501</ee:set-variable>
+                    </ee:variables>
+                </ee:transform>
+            </on-error-propagate>
+        </error-handler>
+    </flow>
+    <flow name="api-console">
+        <http:listener config-ref="api-httpListenerConfig" path="/console/*">
+            <http:response statusCode="#[vars.httpStatus default 200]">
+                <http:headers>#[vars.outboundHeaders default {}]</http:headers>
+            </http:response>
+            <http:error-response statusCode="#[vars.httpStatus default 500]">
+                <http:body>#[payload]</http:body>
+                <http:headers>#[vars.outboundHeaders default {}]</http:headers>
+            </http:error-response>
+        </http:listener>
+        <apikit:console config-ref="api-config" />
+        <error-handler>
+            <on-error-propagate type="APIKIT:NOT_FOUND">
+                <ee:transform doc:name="Transform Message">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{message: "Resource not found"}]]></ee:set-payload>
+                    </ee:message>
+                    <ee:variables>
+                        <ee:set-variable variableName="httpStatus">404</ee:set-variable>
+                    </ee:variables>
+                </ee:transform>
+            </on-error-propagate>
+        </error-handler>
+    </flow>
+    <flow name="get:\orders\(id):api-config">
+        <ee:transform doc:name="Transform Message">
+            <ee:variables>
+                <ee:set-variable variableName="id">attributes.uriParams.'id'</ee:set-variable>
+            </ee:variables>
+        </ee:transform>
+        <ee:transform doc:name="Transform Message">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+  id: 1,
+  client: "John Doe",
+  amount: 100,
+  status: "pending"
+} as Object {encoding: "UTF-8", mediaType: "application/json"}]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+    </flow>
+    <flow name="post:\orders:application\json:api-config">
+        <ee:transform doc:name="Transform Message">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+  message: "Order created"
+} as Object {encoding: "UTF-8", mediaType: "application/json"}]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+    </flow>
+</mule>
